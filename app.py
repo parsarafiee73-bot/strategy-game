@@ -1,0 +1,758 @@
+import os
+import logging
+import random
+
+import requests
+import psycopg
+from flask import Flask, request, jsonify
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("strategy-game")
+
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+DATABASE_URL = os.environ["DATABASE_URL"]
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip("/")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+
+app = Flask(__name__)
+
+# ============================================================
+# COUNTRY DATA
+# ============================================================
+
+COUNTRIES = {
+    "Iran": {
+        "flag": "🇮🇷", "cash": 10000, "income": 1200,
+        "population": 90, "food": 250, "steel": 180, "oil": 220,
+        "army": 70, "missiles": 18, "defense": 45,
+        "stability": 72, "tech": 3, "max_ap": 6,
+        "farm": 2, "factory": 1, "steel_mill": 1,
+        "university": 1, "bunker": 1, "command": 1
+    },
+
+    "Turkey": {
+        "flag": "🇹🇷", "cash": 10000, "income": 1250,
+        "population": 85, "food": 240, "steel": 190, "oil": 130,
+        "army": 72, "missiles": 15, "defense": 46,
+        "stability": 75, "tech": 3, "max_ap": 6,
+        "farm": 2, "factory": 2, "steel_mill": 1,
+        "university": 1, "bunker": 1, "command": 1
+    },
+
+    "Iraq": {
+        "flag": "🇮🇶", "cash": 8000, "income": 900,
+        "population": 45, "food": 200, "steel": 110, "oil": 280,
+        "army": 55, "missiles": 10, "defense": 36,
+        "stability": 63, "tech": 2, "max_ap": 5,
+        "farm": 2, "factory": 1, "steel_mill": 1,
+        "university": 0, "bunker": 1, "command": 1
+    },
+
+    "Germany": {
+        "flag": "🇩🇪", "cash": 12000, "income": 1600,
+        "population": 84, "food": 230, "steel": 220, "oil": 90,
+        "army": 75, "missiles": 12, "defense": 52,
+        "stability": 85, "tech": 5, "max_ap": 7,
+        "farm": 2, "factory": 3, "steel_mill": 2,
+        "university": 2, "bunker": 1, "command": 2
+    },
+
+    "France": {
+        "flag": "🇫🇷", "cash": 12000, "income": 1550,
+        "population": 68, "food": 240, "steel": 190, "oil": 100,
+        "army": 76, "missiles": 14, "defense": 50,
+        "stability": 84, "tech": 5, "max_ap": 7,
+        "farm": 3, "factory": 2, "steel_mill": 1,
+        "university": 2, "bunker": 1, "command": 2
+    },
+
+    "UK": {
+        "flag": "🇬🇧", "cash": 11500, "income": 1500,
+        "population": 68, "food": 190, "steel": 180, "oil": 80,
+        "army": 73, "missiles": 13, "defense": 49,
+        "stability": 82, "tech": 5, "max_ap": 7,
+        "farm": 2, "factory": 2, "steel_mill": 1,
+        "university": 2, "bunker": 1, "command": 2
+    },
+
+    "Japan": {
+        "flag": "🇯🇵", "cash": 11500, "income": 1500,
+        "population": 124, "food": 180, "steel": 220, "oil": 70,
+        "army": 68, "missiles": 11, "defense": 54,
+        "stability": 88, "tech": 6, "max_ap": 7,
+        "farm": 1, "factory": 3, "steel_mill": 2,
+        "university": 3, "bunker": 2, "command": 2
+    },
+
+    "India": {
+        "flag": "🇮🇳", "cash": 10500, "income": 1350,
+        "population": 142, "food": 300, "steel": 170, "oil": 130,
+        "army": 80, "missiles": 16, "defense": 44,
+        "stability": 70, "tech": 4, "max_ap": 6,
+        "farm": 3, "factory": 2, "steel_mill": 1,
+        "university": 2, "bunker": 1, "command": 1
+    },
+
+    "Brazil": {
+        "flag": "🇧🇷", "cash": 9500, "income": 1100,
+        "population": 216, "food": 330, "steel": 140, "oil": 200,
+        "army": 62, "missiles": 8, "defense": 40,
+        "stability": 74, "tech": 3, "max_ap": 6,
+        "farm": 4, "factory": 1, "steel_mill": 1,
+        "university": 1, "bunker": 1, "command": 1
+    },
+
+    "USA": {
+        "flag": "🇺🇸", "cash": 15000, "income": 1900,
+        "population": 335, "food": 350, "steel": 260, "oil": 250,
+        "army": 90, "missiles": 24, "defense": 58,
+        "stability": 86, "tech": 7, "max_ap": 8,
+        "farm": 4, "factory": 4, "steel_mill": 3,
+        "university": 3, "bunker": 2, "command": 3
+    },
+
+    "China": {
+        "flag": "🇨🇳", "cash": 14500, "income": 1850,
+        "population": 1400, "food": 360, "steel": 300, "oil": 170,
+        "army": 92, "missiles": 26, "defense": 55,
+        "stability": 84, "tech": 6, "max_ap": 8,
+        "farm": 4, "factory": 4, "steel_mill": 4,
+        "university": 3, "bunker": 2, "command": 3
+    },
+
+    "Russia": {
+        "flag": "🇷🇺", "cash": 12500, "income": 1550,
+        "population": 145, "food": 280, "steel": 250, "oil": 320,
+        "army": 88, "missiles": 28, "defense": 56,
+        "stability": 76, "tech": 5, "max_ap": 7,
+        "farm": 3, "factory": 3, "steel_mill": 3,
+        "university": 2, "bunker": 2, "command": 2
+    }
+}
+
+# ============================================================
+# BUILDINGS
+# ============================================================
+
+BUILDINGS = {
+    "farm": {
+        "label": "🌾 مزرعه",
+        "cost": 2200,
+        "steel": 20,
+        "desc": "+35 غذا در هر نوبت"
+    },
+
+    "factory": {
+        "label": "🏭 کارخانه",
+        "cost": 3200,
+        "steel": 40,
+        "desc": "+250 درآمد در هر نوبت"
+    },
+
+    "steel_mill": {
+        "label": "⛓ کارخانه فولاد",
+        "cost": 3000,
+        "steel": 35,
+        "desc": "+25 فولاد در هر نوبت"
+    },
+
+    "university": {
+        "label": "🎓 دانشگاه",
+        "cost": 4200,
+        "steel": 25,
+        "desc": "+1 فناوری"
+    },
+
+    "bunker": {
+        "label": "🛡 مرکز دفاع",
+        "cost": 3600,
+        "steel": 50,
+        "desc": "+8 دفاع"
+    },
+
+    "command": {
+        "label": "🏛 مرکز فرماندهی",
+        "cost": 5000,
+        "steel": 60,
+        "desc": "+1 اقدام در هر نوبت"
+    }
+}
+
+# ============================================================
+# RESEARCH
+# ============================================================
+
+RESEARCH = {
+    "economy": ("💹 اقتصاد", "درآمد بیشتر و هزینه ساخت کمتر"),
+    "industry": ("🏭 صنعت", "تولید منابع بهتر"),
+    "military": ("⚔️ نظامی", "قدرت نظامی بیشتر"),
+    "logistics": ("🚚 لجستیک", "اقدامات و جذب نیرو بهتر"),
+    "diplomacy": ("🤝 دیپلماسی", "تجارت بهتر")
+}
+
+# ============================================================
+# DATABASE
+# ============================================================
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS games (
+    chat_id BIGINT PRIMARY KEY,
+    host_id BIGINT NOT NULL,
+    turn INTEGER NOT NULL DEFAULT 1,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS players (
+    chat_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    username TEXT,
+    country TEXT,
+    ready BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (chat_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS countries (
+    chat_id BIGINT NOT NULL,
+    name TEXT NOT NULL,
+    owner_id BIGINT,
+    cash BIGINT NOT NULL,
+    income BIGINT NOT NULL,
+    population BIGINT NOT NULL,
+    food INTEGER NOT NULL,
+    steel INTEGER NOT NULL,
+    oil INTEGER NOT NULL,
+    army INTEGER NOT NULL,
+    missiles INTEGER NOT NULL,
+    defense INTEGER NOT NULL,
+    stability INTEGER NOT NULL,
+    tech INTEGER NOT NULL,
+    max_ap INTEGER NOT NULL,
+    ap INTEGER NOT NULL,
+    farm INTEGER DEFAULT 0,
+    factory INTEGER DEFAULT 0,
+    steel_mill INTEGER DEFAULT 0,
+    university INTEGER DEFAULT 0,
+    bunker INTEGER DEFAULT 0,
+    command INTEGER DEFAULT 0,
+    economy_lvl INTEGER DEFAULT 0,
+    industry_lvl INTEGER DEFAULT 0,
+    military_lvl INTEGER DEFAULT 0,
+    logistics_lvl INTEGER DEFAULT 0,
+    diplomacy_lvl INTEGER DEFAULT 0,
+    score BIGINT DEFAULT 0,
+    PRIMARY KEY(chat_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS wars (
+    id BIGSERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    attacker TEXT NOT NULL,
+    defender TEXT NOT NULL,
+    action TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    result TEXT NOT NULL,
+    turn INTEGER NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS market_log (
+    id BIGSERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    country TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    price BIGINT NOT NULL,
+    turn INTEGER NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
+
+def db():
+    return psycopg.connect(
+        DATABASE_URL,
+        connect_timeout=10
+    )
+
+
+def init_db():
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA)
+        conn.commit()
+
+
+# ============================================================
+# TELEGRAM
+# ============================================================
+
+def tg(method, data=None):
+    response = requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/{method}",
+        json=data or {},
+        timeout=15
+    )
+
+    response.raise_for_status()
+    return response.json()
+
+
+def send(chat_id, text, keyboard=None):
+    data = {
+        "chat_id": chat_id,
+        "text": text
+    }
+
+    if keyboard:
+        data["reply_markup"] = {
+            "inline_keyboard": keyboard
+        }
+
+    return tg("sendMessage", data)
+
+
+def edit(chat_id, message_id, text, keyboard=None):
+    data = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text
+    }
+
+    if keyboard:
+        data["reply_markup"] = {
+            "inline_keyboard": keyboard
+        }
+
+    return tg("editMessageText", data)
+
+
+def answer_callback(callback_id, text=""):
+    return tg(
+        "answerCallbackQuery",
+        {
+            "callback_query_id": callback_id,
+            "text": text[:190]
+        }
+    )
+
+
+# ============================================================
+# DATABASE HELPERS
+# ============================================================
+
+def get_game(chat_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT chat_id, host_id, turn, active
+                FROM games
+                WHERE chat_id=%s
+                """,
+                (chat_id,)
+            )
+            return cur.fetchone()
+
+
+def get_player(chat_id, user_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT chat_id,user_id,username,country,ready
+                FROM players
+                WHERE chat_id=%s AND user_id=%s
+                """,
+                (chat_id, user_id)
+            )
+            return cur.fetchone()
+
+
+def get_country(chat_id, name):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    chat_id,name,owner_id,cash,income,
+                    population,food,steel,oil,army,
+                    missiles,defense,stability,tech,
+                    max_ap,ap,farm,factory,steel_mill,
+                    university,bunker,command,
+                    economy_lvl,industry_lvl,military_lvl,
+                    logistics_lvl,diplomacy_lvl,score
+                FROM countries
+                WHERE chat_id=%s AND name=%s
+                """,
+                (chat_id, name)
+            )
+            return cur.fetchone()
+
+
+def get_owned_country(chat_id, user_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT name
+                FROM countries
+                WHERE chat_id=%s AND owner_id=%s
+                """,
+                (chat_id, user_id)
+            )
+
+            row = cur.fetchone()
+
+            return row[0] if row else None
+
+
+# ============================================================
+# SCORE
+# ============================================================
+
+def score_country(c):
+    return (
+        c[5] // 2
+        + c[3] // 50
+        + c[9] * 5
+        + c[11] * 4
+        + c[12] * 3
+        + c[13] * 60
+        + (
+            c[16]
+            + c[17]
+            + c[18]
+            + c[19]
+            + c[20]
+            + c[21]
+        ) * 25
+    )
+
+
+def update_score(cur, chat_id, country):
+    cur.execute(
+        """
+        SELECT *
+        FROM countries
+        WHERE chat_id=%s AND name=%s
+        """,
+        (chat_id, country)
+    )
+
+    c = cur.fetchone()
+
+    if not c:
+        return
+
+    score = score_country(c)
+
+    cur.execute(
+        """
+        UPDATE countries
+        SET score=%s
+        WHERE chat_id=%s AND name=%s
+        """,
+        (score, chat_id, country)
+    )
+
+
+# ============================================================
+# KEYBOARDS
+# ============================================================
+
+def main_menu():
+    return [
+        [
+            {"text": "📊 وضعیت", "callback_data": "menu:status"},
+            {"text": "🌍 جهان", "callback_data": "menu:world"}
+        ],
+        [
+            {"text": "🏗 ساخت‌وساز", "callback_data": "menu:build"},
+            {"text": "🔬 تحقیق", "callback_data": "menu:research"}
+        ],
+        [
+            {"text": "⚔️ عملیات", "callback_data": "menu:operations"},
+            {"text": "💱 بازار", "callback_data": "menu:market"}
+        ],
+        [
+            {"text": "🏆 رتبه‌بندی", "callback_data": "menu:leaderboard"},
+            {"text": "📜 تاریخچه", "callback_data": "menu:history"}
+        ],
+        [
+            {"text": "✅ پایان نوبت", "callback_data": "menu:endturn"}
+        ]
+    ]
+
+
+def build_keyboard():
+    return [
+        [
+            {"text": "🌾 مزرعه", "callback_data": "build:farm"},
+            {"text": "🏭 کارخانه", "callback_data": "build:factory"}
+        ],
+        [
+            {"text": "⛓ فولاد", "callback_data": "build:steel_mill"},
+            {"text": "🎓 دانشگاه", "callback_data": "build:university"}
+        ],
+        [
+            {"text": "🛡 دفاع", "callback_data": "build:bunker"},
+            {"text": "🏛 فرماندهی", "callback_data": "build:command"}
+        ]
+    ]
+
+
+def research_keyboard():
+    return [
+        [
+            {"text": "💹 اقتصاد", "callback_data": "research:economy"},
+            {"text": "🏭 صنعت", "callback_data": "research:industry"}
+        ],
+        [
+            {"text": "⚔️ نظامی", "callback_data": "research:military"},
+            {"text": "🚚 لجستیک", "callback_data": "research:logistics"}
+        ],
+        [
+            {"text": "🤝 دیپلماسی", "callback_data": "research:diplomacy"}
+        ]
+    ]
+
+
+def country_keyboard(chat_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT name
+                FROM countries
+                WHERE chat_id=%s AND owner_id IS NULL
+                ORDER BY name
+                """,
+                (chat_id,)
+            )
+
+            countries = [
+                row[0]
+                for row in cur.fetchall()
+            ]
+
+    rows = []
+
+    for i in range(0, len(countries), 2):
+        row = []
+
+        for country in countries[i:i + 2]:
+            row.append({
+                "text": f'{COUNTRIES[country]["flag"]} {country}',
+                "callback_data": f"pick:{country}"
+            })
+
+        rows.append(row)
+
+    return rows
+
+
+def operations_keyboard(chat_id, user_id):
+    my_country = get_owned_country(chat_id, user_id)
+
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT name
+                FROM countries
+                WHERE chat_id=%s
+                AND name<>%s
+                ORDER BY name
+                """,
+                (chat_id, my_country or "")
+            )
+
+            targets = [
+                row[0]
+                for row in cur.fetchall()
+            ]
+
+    rows = []
+
+    for target in targets:
+        rows.append([
+            {
+                "text": f'⚔️ {COUNTRIES[target]["flag"]} {target}',
+                "callback_data": f"attack:{target}"
+            },
+            {
+                "text": f'🚀 {COUNTRIES[target]["flag"]} {target}',
+                "callback_data": f"missile:{target}"
+            }
+        ])
+
+    return rows
+
+
+# ============================================================
+# STATUS
+# ============================================================
+
+def status_text(chat_id, user_id):
+    country = get_owned_country(
+        chat_id,
+        user_id
+    )
+
+    if not country:
+        return (
+            "❌ هنوز کشوری انتخاب نکردی.\n"
+            "از /country استفاده کن."
+        )
+
+    c = get_country(
+        chat_id,
+        country
+    )
+
+    (
+        _,
+        name,
+        owner,
+        cash,
+        income,
+        population,
+        food,
+        steel,
+        oil,
+        army,
+        missiles,
+        defense,
+        stability,
+        tech,
+        max_ap,
+        ap,
+        farm,
+        factory,
+        steel_mill,
+        university,
+        bunker,
+        command,
+        economy,
+        industry,
+        military,
+        logistics,
+        diplomacy,
+        score
+    ) = c
+
+    return (
+        f'{COUNTRIES[name]["flag"]} {name}\n'
+        f'━━━━━━━━━━━━━━\n'
+        f'🏆 امتیاز: {score_country(c):,}\n\n'
+        f'💰 خزانه: {cash:,}\n'
+        f'📈 درآمد: {income:,}/نوبت\n'
+        f'👥 جمعیت: {population:,}M\n\n'
+        f'🌾 غذا: {food}\n'
+        f'⛓ فولاد: {steel}\n'
+        f'🛢 نفت: {oil}\n\n'
+        f'⚔️ قدرت نظامی: {army}\n'
+        f'🚀 موشک بازی: {missiles}\n'
+        f'🛡 دفاع: {defense}\n'
+        f'📊 ثبات: {stability}/100\n'
+        f'🔬 فناوری: {tech}\n'
+        f'⚡ اقدامات: {ap}/{max_ap}\n\n'
+        f'🏗 ساختمان‌ها\n'
+        f'🌾 مزرعه: {farm}\n'
+        f'🏭 کارخانه: {factory}\n'
+        f'⛓ فولاد: {steel_mill}\n'
+        f'🎓 دانشگاه: {university}\n'
+        f'🛡 دفاع: {bunker}\n'
+        f'🏛 فرماندهی: {command}\n\n'
+        f'🔬 تحقیقات\n'
+        f'💹 اقتصاد: {economy}/5\n'
+        f'🏭 صنعت: {industry}/5\n'
+        f'⚔️ نظامی: {military}/5\n'
+        f'🚚 لجستیک: {logistics}/5\n'
+        f'🤝 دیپلماسی: {diplomacy}/5'
+    )
+
+
+# ============================================================
+# WORLD
+# ============================================================
+
+def world_text(chat_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    c.name,
+                    c.owner_id,
+                    c.stability,
+                    c.army,
+                    c.score,
+                    p.username
+                FROM countries c
+                LEFT JOIN players p
+                    ON p.chat_id=c.chat_id
+                    AND p.user_id=c.owner_id
+                WHERE c.chat_id=%s
+                ORDER BY c.score DESC
+                """,
+                (chat_id,)
+            )
+
+            rows = cur.fetchall()
+
+    text = "🌍 وضعیت جهان\n\n"
+
+    for name, owner, stability, army, score, username in rows:
+        owner_name = (
+            f"@{username}"
+            if username
+            else "آزاد"
+        )
+
+        text += (
+            f'{COUNTRIES[name]["flag"]} {name}\n'
+            f'👤 {owner_name}\n'
+            f'⚔️ {army} | 🛡 {stability} | 🏆 {score:,}\n\n'
+        )
+
+    return text
+
+
+def leaderboard_text(chat_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.name,c.score,p.username
+                FROM countries c
+                LEFT JOIN players p
+                    ON p.chat_id=c.chat_id
+                    AND p.user_id=c.owner_id
+                WHERE c.chat_id=%s
+                AND c.owner_id IS NOT NULL
+                ORDER BY c.score DESC
+                """,
+                (chat_id,)
+            )
+
+            rows = cur.fetchall()
+
+    if not rows:
+        return "هنوز کسی کشور انتخاب نکرده."
+
+    text = "🏆 رتبه‌بندی جهان\n\n"
+
+    for index, (name, score, username) in enumerate(rows, 1):
+        player = (
+            f"@{username}"
+            if username
+            else "بازیکن"
+        )
+
+        text += (
+            f"{index}. "
+            f'{COUNTRIES[name]["flag"]} '
