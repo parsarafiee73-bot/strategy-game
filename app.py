@@ -710,3 +710,790 @@ def choose_country(game_id, user_id, code):
 # ============================================================
 # TELEGRAM API
 # ============================
+def telegram_request(method, data=None):
+    if not TELEGRAM_API:
+        logger.error("BOT_TOKEN is missing")
+        return None
+
+    try:
+        response = requests.post(
+            f"{TELEGRAM_API}/{method}",
+            json=data or {},
+            timeout=20
+        )
+
+        logger.info(
+            "Telegram %s -> %s",
+            method,
+            response.status_code
+        )
+
+        return response.json()
+
+    except Exception:
+        logger.exception("Telegram API request failed")
+        return None
+
+
+def send_message(chat_id, text, reply_markup=None):
+    data = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+
+    if reply_markup:
+        data["reply_markup"] = reply_markup
+
+    return telegram_request("sendMessage", data)
+
+
+def answer_callback(callback_query_id, text=None):
+    data = {
+        "callback_query_id": callback_query_id
+    }
+
+    if text:
+        data["text"] = text
+
+    return telegram_request("answerCallbackQuery", data)
+
+
+def edit_message(chat_id, message_id, text, reply_markup=None):
+    data = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+
+    if reply_markup:
+        data["reply_markup"] = reply_markup
+
+    return telegram_request("editMessageText", data)
+
+
+# ============================================================
+# KEYBOARDS
+# ============================================================
+
+def main_keyboard(lang):
+    return {
+        "keyboard": [
+            [
+                {"text": t(lang, "new_game")},
+                {"text": t(lang, "join_game")}
+            ],
+            [
+                {"text": t(lang, "my_game")},
+                {"text": t(lang, "help_btn")}
+            ],
+            [
+                {"text": t(lang, "language")}
+            ]
+        ],
+        "resize_keyboard": True
+    }
+
+
+def language_keyboard():
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "🇮🇷 فارسی",
+                    "callback_data": "lang:fa"
+                },
+                {
+                    "text": "🇬🇧 English",
+                    "callback_data": "lang:en"
+                }
+            ]
+        ]
+    }
+
+
+def start_game_keyboard(game_id, lang):
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": t(lang, "start_game"),
+                    "callback_data": f"start:{game_id}"
+                }
+            ]
+        ]
+    }
+
+
+def country_inline_keyboard(lang, game_id, taken_codes):
+    rows = []
+    row = []
+
+    for country in COUNTRIES:
+        if country["code"] in taken_codes:
+            continue
+
+        row.append({
+            "text": country[lang],
+            "callback_data": f"country:{game_id}:{country['code']}"
+        })
+
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+
+    if row:
+        rows.append(row)
+
+    return {
+        "inline_keyboard": rows
+    }
+
+
+# ============================================================
+# GAME STATUS
+# ============================================================
+
+def game_status_text(game_id, lang):
+    players = get_players(game_id)
+
+    lines = []
+
+    for i, player in enumerate(players, start=1):
+        user_id, username, chat_id, country = player
+
+        name = f"@{username}" if username else str(user_id)
+
+        if country:
+            country_text = country_name(country, lang)
+        else:
+            country_text = "—"
+
+        lines.append(
+            f"{i}. {name} — {country_text}"
+        )
+
+    if not lines:
+        return "—"
+
+    return "\n".join(lines)
+
+
+# ============================================================
+# MESSAGE HANDLER
+# ============================================================
+
+def handle_message(message):
+    chat = message.get("chat", {})
+    user = message.get("from", {})
+
+    chat_id = chat.get("id")
+    user_id = user.get("id")
+
+    if not chat_id or not user_id:
+        return
+
+    username = user.get("username")
+
+    lang = get_language(user_id)
+
+    text = message.get("text", "")
+    text = text.strip()
+
+    # --------------------------------------------------------
+    # COMMANDS
+    # --------------------------------------------------------
+
+    if text.startswith("/start"):
+        clear_pending(user_id)
+
+        send_message(
+            chat_id,
+            t(lang, "welcome"),
+            main_keyboard(lang)
+        )
+        return
+
+    if text.startswith("/help"):
+        send_message(
+            chat_id,
+            t(lang, "help"),
+            main_keyboard(lang)
+        )
+        return
+
+    if text.startswith("/newgame"):
+        create_new_game(chat_id, user_id, username, lang)
+        return
+
+    if text.startswith("/join"):
+        set_pending(user_id, "join")
+
+        send_message(
+            chat_id,
+            t(lang, "join_prompt"),
+            main_keyboard(lang)
+        )
+        return
+
+    # --------------------------------------------------------
+    # BUTTONS
+    # --------------------------------------------------------
+
+    if text == t(lang, "new_game"):
+        create_new_game(chat_id, user_id, username, lang)
+        return
+
+    if text == t(lang, "join_game"):
+        set_pending(user_id, "join")
+
+        send_message(
+            chat_id,
+            t(lang, "join_prompt"),
+            main_keyboard(lang)
+        )
+        return
+
+    if text == t(lang, "language"):
+        send_message(
+            chat_id,
+            t(lang, "choose_language"),
+            language_keyboard()
+        )
+        return
+
+    if text == t(lang, "help_btn"):
+        send_message(
+            chat_id,
+            t(lang, "help"),
+            main_keyboard(lang)
+        )
+        return
+
+    if text == t(lang, "my_game"):
+        show_my_game(chat_id, user_id, lang)
+        return
+
+    # --------------------------------------------------------
+    # PENDING ACTIONS
+    # --------------------------------------------------------
+
+    pending = get_pending(user_id)
+
+    if pending == "join":
+        code = text.upper()
+
+        if len(code) != 6 or not code.isalnum():
+            send_message(
+                chat_id,
+                t(lang, "invalid_code"),
+                main_keyboard(lang)
+            )
+            return
+
+        game = get_game_by_code(code)
+
+        if not game:
+            send_message(
+                chat_id,
+                t(lang, "game_not_found"),
+                main_keyboard(lang)
+            )
+            return
+
+        game_id, game_code, owner_id, status = game
+
+        result = join_game(
+            game_id,
+            user_id,
+            username,
+            chat_id
+        )
+
+        if result == "not_found":
+            send_message(chat_id, t(lang, "game_not_found"))
+            return
+
+        if result == "started":
+            send_message(chat_id, t(lang, "game_started_join"))
+            return
+
+        if result == "already":
+            send_message(chat_id, t(lang, "already_joined"))
+            return
+
+        if result == "error":
+            send_message(chat_id, t(lang, "db_error"))
+            return
+
+        clear_pending(user_id)
+
+        send_message(
+            chat_id,
+            t(lang, "joined"),
+            main_keyboard(lang)
+        )
+
+        notify_game_players(game_id, lang)
+
+        return
+
+    # --------------------------------------------------------
+    # UNKNOWN
+    # --------------------------------------------------------
+
+    send_message(
+        chat_id,
+        t(lang, "unknown"),
+        main_keyboard(lang)
+    )
+
+
+def create_new_game(chat_id, user_id, username, lang):
+    clear_pending(user_id)
+
+    game_id, code = create_game(
+        user_id,
+        username,
+        chat_id
+    )
+
+    if not game_id:
+        send_message(
+            chat_id,
+            t(lang, "db_error"),
+            main_keyboard(lang)
+        )
+        return
+
+    send_message(
+        chat_id,
+        t(
+            lang,
+            "new_game_created",
+            code=code
+        ),
+        start_game_keyboard(game_id, lang)
+    )
+
+
+def show_my_game(chat_id, user_id, lang):
+    game = get_user_game(user_id)
+
+    if not game:
+        send_message(
+            chat_id,
+            t(lang, "no_game"),
+            main_keyboard(lang)
+        )
+        return
+
+    game_id, code, owner_id, status = game
+
+    status_text = (
+        "⏳ Waiting"
+        if status == "waiting"
+        else "🚀 Active"
+    )
+
+    players_text = game_status_text(
+        game_id,
+        lang
+    )
+
+    text = (
+        f"🎮 <b>{code}</b>\n\n"
+        f"Status: {status_text}\n\n"
+        f"{players_text}"
+    )
+
+    markup = None
+
+    if (
+        owner_id == user_id
+        and status == "waiting"
+    ):
+        markup = start_game_keyboard(
+            game_id,
+            lang
+        )
+
+    send_message(
+        chat_id,
+        text,
+        markup
+    )
+
+
+def notify_game_players(game_id, lang):
+    players = get_players(game_id)
+
+    text = (
+        "👥 <b>Players</b>\n\n"
+        + game_status_text(game_id, lang)
+    )
+
+    for player in players:
+        chat_id = player[2]
+
+        if chat_id:
+            send_message(
+                chat_id,
+                text
+            )
+
+
+# ============================================================
+# CALLBACK HANDLER
+# ============================================================
+
+def handle_callback(callback):
+    callback_id = callback.get("id")
+
+    data = callback.get("data", "")
+
+    message = callback.get("message", {})
+    chat = message.get("chat", {})
+    user = callback.get("from", {})
+
+    chat_id = chat.get("id")
+    message_id = message.get("message_id")
+
+    user_id = user.get("id")
+
+    if not user_id:
+        return
+
+    lang = get_language(user_id)
+
+    # --------------------------------------------------------
+    # LANGUAGE
+    # --------------------------------------------------------
+
+    if data.startswith("lang:"):
+        new_lang = data.split(":", 1)[1]
+
+        if set_language(user_id, new_lang):
+            answer_callback(
+                callback_id,
+                "Language changed."
+            )
+
+            send_message(
+                chat_id,
+                t(new_lang, "language_changed"),
+                main_keyboard(new_lang)
+            )
+
+        return
+
+    # --------------------------------------------------------
+    # START GAME
+    # --------------------------------------------------------
+
+    if data.startswith("start:"):
+        game_id = int(
+            data.split(":", 1)[1]
+        )
+
+        result = start_game(
+            game_id,
+            user_id
+        )
+
+        if result == "owner":
+            answer_callback(
+                callback_id,
+                t(lang, "only_owner")
+            )
+            return
+
+        if result == "players":
+            answer_callback(
+                callback_id,
+                t(lang, "need_players")
+            )
+            return
+
+        if result == "started":
+            answer_callback(
+                callback_id,
+                t(lang, "started")
+            )
+            return
+
+        if result == "not_found":
+            answer_callback(
+                callback_id,
+                t(lang, "game_not_found")
+            )
+            return
+
+        if result == "error":
+            answer_callback(
+                callback_id,
+                t(lang, "db_error")
+            )
+            return
+
+        answer_callback(
+            callback_id,
+            t(lang, "started")
+        )
+
+        players = get_players(game_id)
+
+        taken = get_taken_countries(game_id)
+
+        for player in players:
+            player_chat_id = player[2]
+
+            if not player_chat_id:
+                continue
+
+            player_lang = get_language(
+                player[0]
+            )
+
+            send_message(
+                player_chat_id,
+                t(
+                    player_lang,
+                    "choose_country"
+                ),
+                country_inline_keyboard(
+                    player_lang,
+                    game_id,
+                    taken
+                )
+            )
+
+        return
+
+    # --------------------------------------------------------
+    # COUNTRY
+    # --------------------------------------------------------
+
+    if data.startswith("country:"):
+        parts = data.split(":")
+
+        if len(parts) != 3:
+            return
+
+        game_id = int(parts[1])
+        country_code = parts[2]
+
+        result, selected = choose_country(
+            game_id,
+            user_id,
+            country_code
+        )
+
+        if result == "taken":
+            answer_callback(
+                callback_id,
+                t(lang, "country_taken")
+            )
+            return
+
+        if result == "already":
+            answer_callback(
+                callback_id,
+                t(
+                    lang,
+                    "country_already",
+                    country=country_name(
+                        selected,
+                        lang
+                    )
+                )
+            )
+            return
+
+        if result == "not_member":
+            answer_callback(
+                callback_id,
+                t(lang, "no_game")
+            )
+            return
+
+        if result == "error":
+            answer_callback(
+                callback_id,
+                t(lang, "db_error")
+            )
+            return
+
+        answer_callback(
+            callback_id,
+            "OK"
+        )
+
+        edit_message(
+            chat_id,
+            message_id,
+            t(
+                lang,
+                "country_selected",
+                country=country_name(
+                    selected,
+                    lang
+                )
+            )
+        )
+
+        return
+
+
+# ============================================================
+# FLASK ROUTES
+# ============================================================
+
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "ok",
+        "service": "strategy-game"
+    })
+
+
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "ok"
+    })
+
+
+@app.route("/telegram", methods=["POST"])
+def telegram_webhook():
+    try:
+        if WEBHOOK_SECRET:
+            received_secret = request.headers.get(
+                "X-Telegram-Bot-Api-Secret-Token"
+            )
+
+            if received_secret != WEBHOOK_SECRET:
+                return jsonify({
+                    "ok": False,
+                    "error": "Unauthorized"
+                }), 403
+
+        update = request.get_json(
+            silent=True
+        )
+
+        if not update:
+            return jsonify({
+                "ok": True
+            })
+
+        if "message" in update:
+            handle_message(
+                update["message"]
+            )
+
+        elif "callback_query" in update:
+            handle_callback(
+                update["callback_query"]
+            )
+
+        return jsonify({
+            "ok": True
+        })
+
+    except Exception:
+        logger.exception(
+            "Webhook processing failed"
+        )
+
+        return jsonify({
+            "ok": False
+        }), 500
+
+
+@app.route("/set-webhook")
+def set_webhook():
+    if not TELEGRAM_API:
+        return jsonify({
+            "ok": False,
+            "error": "BOT_TOKEN is missing"
+        }), 500
+
+    webhook = WEBHOOK_URL.rstrip(
+        "/"
+    ) + "/telegram"
+
+    data = {
+        "url": webhook
+    }
+
+    if WEBHOOK_SECRET:
+        data["secret_token"] = WEBHOOK_SECRET
+
+    result = telegram_request(
+        "setWebhook",
+        data
+    )
+
+    return jsonify(
+        result or {
+            "ok": False
+        }
+    )
+
+
+@app.route("/webhook-info")
+def webhook_info():
+    result = telegram_request(
+        "getWebhookInfo"
+    )
+
+    return jsonify(
+        result or {
+            "ok": False
+        }
+    )
+
+
+# ============================================================
+# ERROR HANDLERS
+# ============================================================
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({
+        "ok": False,
+        "error": "Not found"
+    }), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.exception(
+        "Internal server error"
+    )
+
+    return jsonify({
+        "ok": False,
+        "error": "Internal server error"
+    }), 500
+
+
+# ============================================================
+# STARTUP
+# ============================================================
+
+try:
+    init_db()
+except Exception:
+    logger.exception(
+        "Startup database initialization failed"
+    )
+
+
+if __name__ == "__main__":
+    app.run(
+        host="0.0.0.0",
+        port=PORT
+        )
