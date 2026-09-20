@@ -863,7 +863,7 @@ add_column_if_missing(
                 "TEXT"
 )
 
-             add_column_if_missing(
+            add_column_if_missing(
                 cur,
                 "players",
                 "first_name",
