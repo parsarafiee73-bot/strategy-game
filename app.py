@@ -863,19 +863,12 @@ def init_db():
                 "TEXT"
             )
 
-            add_column_if_missing(
+             add_column_if_missing(
                 cur,
                 "players",
                 "first_name",
                 "TEXT"
             )
-add_column_if_missing(
-                cur,
-                "players",
-                "first_name",
-                "TEXT"
-            )
-            # ← دقیقاً همین‌جا، بین این‌ها و کامنت بعدی، کد جدید را اضافه کن
 
             add_column_if_missing(
                 cur,
@@ -938,7 +931,7 @@ add_column_if_missing(
                 "players",
                 "score",
                 "INTEGER NOT NULL DEFAULT 0"
-            ) 
+            )
 
        # ============================================================
 # USER SETTINGS
