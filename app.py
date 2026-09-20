@@ -1739,7 +1739,73 @@ def start_game(
                     "GAME_NOT_WAITING"
                 )
 
+            # Check number of players
             cur.execute(
+                """
+                SELECT *
+                FROM players
+                WHERE game_id = %s
+                ORDER BY id ASC
+                """,
+                (game_id,)
+            )
+
+            players = cur.fetchall()
+
+            if len(players) < 2:
+                raise ValueError(
+                    "NOT_ENOUGH_PLAYERS"
+                )
+
+            # Everyone must choose a country
+            for player in players:
+
+                if not player["country"]:
+                    raise ValueError(
+                        "COUNTRY_NOT_SELECTED"
+                    )
+
+            # First player starts the game
+            first_player = players[0]
+
+            # Reset actions for all players
+            cur.execute(
+                """
+                UPDATE players
+                SET actions_left = 3
+                WHERE game_id = %s
+                """,
+                (game_id,)
+            )
+
+            # Start game
+            cur.execute(
+                """
+                UPDATE games
+                SET
+                    status = 'running',
+                    total_turn = 1,
+                    current_player_id = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (
+                    first_player["id"],
+                    game_id
+                )
+            )
+
+            started_game = cur.fetchone()
+
+            return started_game
+
+
+# ============================================================
+# GAME ACTIONS
+# ============================================================
+
+ 
           # ============================================================
 # GAME ACTIONS
 # ============================================================
