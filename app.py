@@ -3792,7 +3792,44 @@ def bot_info():
 
     return jsonify(result)
 
+# ============================================================
+# TELEGRAM WEBHOOK
+# ============================================================
 
+@app.route("/telegram", methods=["POST"])
+def telegram_webhook():
+
+    if WEBHOOK_SECRET:
+        secret = request.headers.get(
+            "X-Telegram-Bot-Api-Secret-Token",
+            ""
+        )
+
+        if secret != WEBHOOK_SECRET:
+            return jsonify({
+                "ok": False,
+                "error": "unauthorized"
+            }), 403
+
+    update = request.get_json(silent=True)
+
+    if not update:
+        return jsonify({
+            "ok": False,
+            "error": "empty_update"
+        }), 400
+
+    try:
+        process_update(update)
+
+    except Exception:
+        logger.exception(
+            "Error while processing Telegram update"
+        )
+
+    return jsonify({
+        "ok": True
+   
 # ============================================================
 # ERROR HANDLERS
 # ============================================================
