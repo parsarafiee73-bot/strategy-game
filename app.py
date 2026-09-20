@@ -2586,7 +2586,47 @@ def answer_callback(
 # ============================================================
 # TELEGRAM KEYBOARDS
 # ============================================================
+def country_inline_keyboard(
+    game_id: int,
+    language: str
+) -> Dict[str, Any]:
 
+    text = TEXTS[language]
+
+    taken = get_taken_countries(game_id)
+
+    rows = []
+    row = []
+
+    for code in COUNTRIES:
+
+        label = country_name(code, language)
+
+        if code in taken:
+            label = f"✅ {label}"
+
+        row.append({
+            "text": label,
+            "callback_data": f"country:{code}"
+        })
+
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+
+    if row:
+        rows.append(row)
+
+    rows.append([
+        {
+            "text": text["back"],
+            "callback_data": "game:back"
+        }
+    ])
+
+    return {
+        "inline_keyboard": rows
+    }
 def main_keyboard(
     language: str
 ) -> Dict[str, Any]:
@@ -3819,7 +3859,71 @@ def handle_text(message: Dict[str, Any]):
             language_keyboard()
         )
         return
+def handle_callback(callback: Dict[str, Any]):
+    """
+    Dispatch inline keyboard callback queries.
+    """
 
+    callback_query_id = callback.get("id")
+
+    user = get_user_from_callback(callback)
+    user_id = user["id"]
+
+    chat_id = get_chat_id_from_callback(callback)
+
+    message = callback.get("message") or {}
+    message_id = message.get("message_id")
+
+    data = callback.get("data", "")
+
+    if callback_query_id:
+        answer_callback(callback_query_id)
+
+    if not chat_id:
+        return
+
+    language = user_language(user_id)
+
+    prefix, _, value = data.partition(":")
+
+    if prefix == "lang":
+        new_language = value if value in ("fa", "en") else "fa"
+        set_language(user_id, new_language)
+
+        send_message(
+            chat_id,
+            TEXTS[new_language]["language_saved"],
+            main_keyboard(new_language)
+        )
+        return
+
+    if prefix == "game":
+
+        if value == "country":
+            handle_country_menu(chat_id, user_id, message_id)
+            return
+
+        if value == "start":
+            handle_start_game(chat_id, user_id)
+            return
+
+        if value == "back":
+            send_message(
+                chat_id,
+                TEXTS[language]["welcome"],
+                main_keyboard(language)
+            )
+            return
+
+        return
+
+    if prefix == "country":
+        handle_country_choice(chat_id, user_id, value, message_id)
+        return
+
+    if prefix == "action":
+        handle_action(chat_id, user_id, value)
+        return
 
 # ============================================================
 # TELEGRAM UPDATE DISPATCHER
