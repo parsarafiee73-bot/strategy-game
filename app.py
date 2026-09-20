@@ -3692,7 +3692,18 @@ def handle_action(
             running_keyboard(language)
         )
 
+# ============================================================
+# TELEGRAM UPDATE DISPATCHER
+# ============================================================
 
+def process_update(update):
+    if "callback_query" in update:
+        handle_callback(update["callback_query"])
+        return
+
+    if "message" in update:
+        handle_message(update["message"])
+        return
 # ============================================
 # ============================================================
 # FLASK ROUTES
