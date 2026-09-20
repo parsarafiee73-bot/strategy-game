@@ -3696,15 +3696,33 @@ def handle_action(
 # TELEGRAM UPDATE DISPATCHER
 # ============================================================
 
-def process_update(update):
-    if "callback_query" in update:
-        handle_callback(update["callback_query"])
+def process_update(update: Dict[str, Any]):
+    """
+    Dispatch incoming Telegram updates to the handlers
+    that actually exist in this app.py.
+    """
+
+    # Callback buttons
+    if update.get("callback_query"):
+        handle_callback(
+            update["callback_query"]
+        )
         return
 
-    if "message" in update:
-        handle_message(update["message"])
+    # Normal messages
+    if update.get("message"):
+        handle_text(
+            update["message"]
+        )
         return
-# ============================================
+
+    # Edited messages
+    if update.get("edited_message"):
+        handle_text(
+            update["edited_message"]
+        )
+        return
+ 
 # ============================================================
 # FLASK ROUTES
 # ============================================================
