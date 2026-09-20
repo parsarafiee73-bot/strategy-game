@@ -3699,3 +3699,136 @@ def handle_action(
 
 
 # ============================================
+# ============================================================
+# FLASK ROUTES
+# ============================================================
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "status": "ok",
+        "service": "strategy-game"
+    })
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "ok"
+    })
+
+
+@app.route("/telegram", methods=["POST"])
+def telegram_webhook():
+
+    if WEBHOOK_SECRET:
+        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+
+        if secret != WEBHOOK_SECRET:
+            return jsonify({
+                "ok": False,
+                "error": "unauthorized"
+            }), 403
+
+    update = request.get_json(silent=True)
+
+    if not update:
+        return jsonify({
+            "ok": False,
+            "error": "empty_update"
+        }), 400
+
+    try:
+        process_update(update)
+
+    except Exception:
+        logger.exception("Error while processing Telegram update")
+
+    return jsonify({
+        "ok": True
+    })
+
+
+@app.route("/set-webhook", methods=["GET", "POST"])
+def set_webhook():
+
+    if not BOT_TOKEN:
+        return jsonify({
+            "ok": False,
+            "error": "BOT_TOKEN is missing"
+        }), 500
+
+    if not WEBHOOK_URL:
+        return jsonify({
+            "ok": False,
+            "error": "WEBHOOK_URL is missing"
+        }), 500
+
+    webhook_url = f"{WEBHOOK_URL}/telegram"
+
+    result = telegram_request(
+        "setWebhook",
+        {
+            "url": webhook_url,
+            "secret_token": WEBHOOK_SECRET
+        }
+    )
+
+    return jsonify(result)
+
+
+@app.route("/webhook-info", methods=["GET"])
+def webhook_info():
+
+    result = telegram_request("getWebhookInfo")
+
+    return jsonify(result)
+
+
+@app.route("/bot-info", methods=["GET"])
+def bot_info():
+
+    result = telegram_request("getMe")
+
+    return jsonify(result)
+
+
+# ============================================================
+# ERROR HANDLERS
+# ============================================================
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({
+        "ok": False,
+        "error": "not_found"
+    }), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.exception("Internal server error")
+
+    return jsonify({
+        "ok": False,
+        "error": "internal_server_error"
+    }), 500
+
+
+# ============================================================
+# STARTUP
+# ============================================================
+
+try:
+    init_db()
+    logger.info("Database initialized successfully")
+
+except Exception:
+    logger.exception("Database initialization failed")
+
+
+if __name__ == "__main__":
+    app.run(
+        host="0.0.0.0",
+        port=PORT
+    )
