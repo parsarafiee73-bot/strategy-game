@@ -3692,41 +3692,163 @@ def handle_action(
             running_keyboard(language)
         )
 
+ # ============================================================
+# TELEGRAM TEXT HANDLER
+# ============================================================
+
+def handle_text(message: Dict[str, Any]):
+    """
+    Handle normal Telegram text messages.
+    """
+
+    user = get_user_from_message(message)
+    user_id = user["id"]
+
+    chat_id = get_chat_id_from_message(message)
+
+    if not chat_id:
+        return
+
+    language = user_language(user_id)
+
+    text = message.get("text", "").strip()
+
+    if not text:
+        return
+
+    # --------------------------------------------------------
+    # /start
+    # --------------------------------------------------------
+
+    if text.startswith("/start"):
+        handle_start(message)
+        return
+
+    # --------------------------------------------------------
+    # Pending actions
+    # --------------------------------------------------------
+
+    pending = get_pending_action(user_id)
+
+    if pending == "join_game":
+        handle_join_code(message, text)
+        set_pending_action(user_id, None)
+        return
+
+    # --------------------------------------------------------
+    # Main keyboard
+    # --------------------------------------------------------
+
+    if text == TEXTS[language]["create_button"]:
+        handle_create_game(message)
+        return
+
+    if text == TEXTS[language]["join_button"]:
+        handle_join_request(
+            chat_id,
+            user_id
+        )
+        return
+
+    if text == TEXTS[language]["my_game"]:
+        handle_my_game(
+            chat_id,
+            user_id
+        )
+        return
+
+    if text == TEXTS[language]["game_menu"]:
+        game = get_user_game(user_id)
+
+        if not game:
+            send_message(
+                chat_id,
+                TEXTS[language]["no_game"],
+                main_keyboard(language)
+            )
+            return
+
+        if game["status"] == "waiting":
+            send_message(
+                chat_id,
+                game_lobby_text(
+                    game["id"],
+                    language
+                ),
+                game_keyboard(language)
+            )
+        elif game["status"] == "running":
+            send_message(
+                chat_id,
+                game_status_text(
+                    game,
+                    language
+                ),
+                running_keyboard(language)
+            )
+        else:
+            send_message(
+                chat_id,
+                final_results_text(
+                    game["id"],
+                    language
+                ),
+                main_keyboard(language)
+            )
+
+        return
+
+    if text == TEXTS[language]["help_button"]:
+        handle_help(
+            chat_id,
+            user_id
+        )
+        return
+
+    if text == TEXTS[language]["rules_button"]:
+        handle_rules(
+            chat_id,
+            user_id
+        )
+        return
+
+    if text == TEXTS[language]["language_button"]:
+        send_message(
+            chat_id,
+            "🌐 Language / زبان",
+            language_keyboard()
+        )
+        return
+
+
 # ============================================================
 # TELEGRAM UPDATE DISPATCHER
 # ============================================================
+
 def process_update(update: Dict[str, Any]):
     """
-    Dispatch Telegram updates.
+    Dispatch incoming Telegram updates.
     """
 
-    # Callback buttons
+    # Inline keyboard callback
     if update.get("callback_query"):
-        handle_callback(update["callback_query"])
+        handle_callback(
+            update["callback_query"]
+        )
         return
 
-    # Normal Telegram messages
+    # Normal message
     if update.get("message"):
-        message = update["message"]
-
-        # /start را مستقیماً به handle_start بده
-        text = message.get("text", "").strip()
-
-        if text.startswith("/start"):
-            handle_start(message)
-        else:
-            handle_start(message) if False else None
-
+        handle_text(
+            update["message"]
+        )
         return
 
-    # Edited messages
+    # Edited message
     if update.get("edited_message"):
-        message = update["edited_message"]
-        text = message.get("text", "").strip()
-
-        if text.startswith("/start"):
-            handle_start(message)
-
+        handle_text(
+            update["edited_message"]
+        )
         return
  
 # ============================================================
