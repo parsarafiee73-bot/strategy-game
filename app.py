@@ -3695,32 +3695,38 @@ def handle_action(
 # ============================================================
 # TELEGRAM UPDATE DISPATCHER
 # ============================================================
-
 def process_update(update: Dict[str, Any]):
     """
-    Dispatch incoming Telegram updates to the handlers
-    that actually exist in this app.py.
+    Dispatch Telegram updates.
     """
 
     # Callback buttons
     if update.get("callback_query"):
-        handle_callback(
-            update["callback_query"]
-        )
+        handle_callback(update["callback_query"])
         return
 
-    # Normal messages
+    # Normal Telegram messages
     if update.get("message"):
-        handle_text(
-            update["message"]
-        )
+        message = update["message"]
+
+        # /start را مستقیماً به handle_start بده
+        text = message.get("text", "").strip()
+
+        if text.startswith("/start"):
+            handle_start(message)
+        else:
+            handle_start(message) if False else None
+
         return
 
     # Edited messages
     if update.get("edited_message"):
-        handle_text(
-            update["edited_message"]
-        )
+        message = update["edited_message"]
+        text = message.get("text", "").strip()
+
+        if text.startswith("/start"):
+            handle_start(message)
+
         return
  
 # ============================================================
