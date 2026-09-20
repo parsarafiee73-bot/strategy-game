@@ -869,6 +869,76 @@ def init_db():
                 "first_name",
                 "TEXT"
             )
+add_column_if_missing(
+                cur,
+                "players",
+                "first_name",
+                "TEXT"
+            )
+            # ← دقیقاً همین‌جا، بین این‌ها و کامنت بعدی، کد جدید را اضافه کن
+
+            add_column_if_missing(
+                cur,
+                "players",
+                "chat_id",
+                "BIGINT"
+            )
+
+            add_column_if_missing(
+                cur,
+                "players",
+                "country",
+                "VARCHAR(2)"
+            )
+
+            add_column_if_missing(
+                cur,
+                "players",
+                "money",
+                "INTEGER NOT NULL DEFAULT 1000"
+            )
+
+            add_column_if_missing(
+                cur,
+                "players",
+                "industry",
+                "INTEGER NOT NULL DEFAULT 10"
+            )
+
+            add_column_if_missing(
+                cur,
+                "players",
+                "science",
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+
+            add_column_if_missing(
+                cur,
+                "players",
+                "stability",
+                "INTEGER NOT NULL DEFAULT 70"
+            )
+
+            add_column_if_missing(
+                cur,
+                "players",
+                "population",
+                "INTEGER NOT NULL DEFAULT 50"
+            )
+
+            add_column_if_missing(
+                cur,
+                "players",
+                "actions_left",
+                "INTEGER NOT NULL DEFAULT 3"
+            )
+
+            add_column_if_missing(
+                cur,
+                "players",
+                "score",
+                "INTEGER NOT NULL DEFAULT 0"
+            ) 
 
        # ============================================================
 # USER SETTINGS
