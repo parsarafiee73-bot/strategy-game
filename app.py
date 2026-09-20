@@ -855,13 +855,13 @@ def init_db():
                 "updated_at",
                 "TIMESTAMP NOT NULL DEFAULT NOW()"
             )
-
-            add_column_if_missing(
+            
+add_column_if_missing(
                 cur,
                 "players",
-                "username",
+                "first_name",
                 "TEXT"
-            )
+)
 
              add_column_if_missing(
                 cur,
